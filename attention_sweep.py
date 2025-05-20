@@ -10,11 +10,10 @@ sweep_config = {
     'method': 'grid',
     'metric': {'name': 'val_loss', 'goal': 'minimize'},
     'parameters': {
-        'epochs': {'values': [30]},
-        'embedding_dim': {'values': [512]},
-        'hidden_dim': {'values': [512]},
+        'epochs': {'values': [5, 10]},
+        'embedding_dim': {'values': [256, 512]},
         'num_layers': {'values': [1,2]},
-        'num_heads': {'values': [4, 8, 16]},
+        'num_heads': {'values': [4, 8]},
         'dropout': {'values': [0.2]},
         'batch_size': {'values': [32]},
         'learning_rate': {'values': [10e-4]},
@@ -26,18 +25,24 @@ def train():
     wandb.init()
     config = wandb.config
     
-    # Initialize data loaders and model
-    train_loader, dev_loader, test_loader, char_to_idx_devanagari, char_to_idx_latin = get_data_loaders()
-    input_vocab_size = len(char_to_idx_devanagari)
-    output_vocab_size = len(char_to_idx_latin)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+    # Load data (Latin → Devanagari)
+    train_loader, dev_loader, test_loader, char_to_idx_latin, char_to_idx_devanagari = get_data_loaders()
+
+    # Vocabulary info
+    input_vocab_size = len(char_to_idx_latin)
+    output_vocab_size = len(char_to_idx_devanagari)
+    idx_to_input = {v: k for k, v in char_to_idx_latin.items()}
+    idx_to_output = {v: k for k, v in char_to_idx_devanagari.items()}
+    # Index maps
+    idx_to_latin = {v: k for k, v in char_to_idx_latin.items()}
+    idx_to_devanagari = {v: k for k, v in char_to_idx_devanagari.items()}
+    device = torch.device("cuda")
     # Model
     model = DualAttentionSeq2Seq(
         input_vocab_size=input_vocab_size,
         output_vocab_size=output_vocab_size,
         embedding_dim=config.embedding_dim,
-        hidden_dim=config.hidden_dim,
+        hidden_dim=config.embedding_dim,
         num_layers=config.num_layers,
         num_heads=config.num_heads,
         dropout=config.dropout,
@@ -45,51 +50,48 @@ def train():
     ).to(device)
     
     # Training setup
-    criterion = nn.CrossEntropyLoss().to(device)
-    optimizer = torch.optim.Adam(model.parameters())
+    criterion = nn.CrossEntropyLoss(ignore_index=0).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr = config.learning_rate)
     
 
     # Training loop
     for epoch in range(config.epochs):
         model.train()
-        total_loss = 0
+        train_loss = 0
         
         for src, trg in train_loader:
-            # Move data to device
-            src = src.to(device)
-            trg = trg.to(device)
+            src, trg = src.to(device), trg.to(device)
+
+            output = model(src, trg[:, :-1])  # teacher forcing
+            loss = criterion(
+                output.reshape(-1, output_vocab_size),
+                trg[:, 1:].reshape(-1)
+            )
             
-            # Forward pass
-            output = model(src, trg[:, :-1])  # Teacher forcing with shifted target
-            
-            # Calculate loss (ignore padding)
-            loss = criterion(output.reshape(-1, output_vocab_size), 
-                            trg[:, 1:].reshape(-1))
-            
-            # Backward pass
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
-            total_loss += loss.item()
+            train_loss += loss.item()
         
-        print(f'Epoch {epoch+1}, Loss: {total_loss/len(train_loader):.4f}')
-
         # Validation
         model.eval()
+        val_loss = 0
         with torch.no_grad():
-            val_loss = 0
             for src, trg in dev_loader:
                 src, trg = src.to(device), trg.to(device)
                 output = model(src, trg[:, :-1])
-                loss = criterion(output.reshape(-1, output_vocab_size), 
-                            trg[:, 1:].reshape(-1))
-                val_loss += loss.item()
-            print(f'Validation Loss: {val_loss/len(dev_loader):.4f}')
+                val_loss += criterion(
+                    output.reshape(-1, output_vocab_size),
+                    trg[:, 1:].reshape(-1)
+                ).item()
+        
+        val_loss /= len(dev_loader)
+        print(f'Epoch {epoch+1}: Train Loss = {train_loss/len(train_loader):.4f}, Val Loss = {val_loss:.4f}')
     wandb.log({
             'epoch': epoch,
-            'train_loss': total_loss/len(train_loader),
+            'train_loss': train_loss/len(train_loader),
             'val_loss': val_loss/len(dev_loader)
         })
 

@@ -5,22 +5,22 @@ import torch.nn as nn
 import wandb
 
 sweep_config = {
-    'name': 'architecture_search',
+    'name': 'fine_search',
     'method': 'grid',
     'metric': {
         'name': 'val_loss',
         'goal': 'minimize'
     },
     'parameters': {
-        'epochs': {'values': [5]},
-        'embedding_dim': {'values': [64,128]},
-        'hidden_dim': {'values': [64, 128, 256]},
-        'cell_type': {'values': ['LSTM', 'GRU', 'RNN']},
-        'num_layers_encoder': {'values': [1, 2]},
-        'dropout': {'values': [0.2, 0.3]},
-        'batch_size': {'values': [32]},
-        'beam_size': {'values': [1]},
-        'learning_rate': {'values' : [10e-3, 10e-4]}
+        'epochs': {'values': [10, 15]},
+        'embedding_dim': {'values': [64]},
+        'hidden_dim': {'values': [256]},
+        'cell_type': {'values': ['LSTM']},
+        'num_layers_encoder': {'values': [1]},
+        'dropout': {'values': [0.2]},
+        'batch_size': {'values': [32, 64]},
+        'beam_size': {'values': [1, 2]},
+        'learning_rate': {'values' : [5e-3, 10e-3, 15e-3]}
         }
 }
 
